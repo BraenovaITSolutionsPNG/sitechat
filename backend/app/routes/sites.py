@@ -63,15 +63,17 @@ async def get_site(site_id: str, user: dict = Depends(require_auth)):
         raise HTTPException(status_code=403, detail="Access denied")
     
     job = await db.get_crawl_job_by_url(site.get("url", "")) if hasattr(db, 'get_crawl_job_by_url') else None
+    job_status = job.get("status") if job else site.get("status", "pending")
     
     return {
         "site_id": site.get("site_id"),
         "name": site.get("name"),
         "url": site.get("url"),
         "user_id": site.get("user_id"),
-        "status": job.get("status") if job else site.get("status", "pending"),
+        "status": job_status,
         "pages_crawled": job.get("pages_crawled", 0) if job else 0,
-        "pages_indexed": job.get("pages_indexed", 0) if job else 0
+        "pages_indexed": job.get("pages_indexed", 0) if job else 0,
+        "error": job.get("errors", [])[-1] if job and job_status == "failed" and job.get("errors") else None
     }
 
 

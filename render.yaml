@@ -45,7 +45,7 @@ services:
       - key: LLM_PROVIDER
         value: openrouter
       - key: LLM_MODEL
-        value: openai/gpt-4o-mini # swap for any model id listed at https://openrouter.ai/models
+        value: liquid/lfm-2.5-2.6b:free # free-tier OpenRouter model (no credits required)
       - key: LLM_TEMPERATURE
         value: "0.7"
       - key: LLM_MAX_TOKENS

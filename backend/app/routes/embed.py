@@ -94,20 +94,38 @@ async def crawl_and_index_site(url: str, site_id: str, max_pages: int = 50):
     """Background task to crawl and index a website."""
     mongodb = await get_mongodb()
     job_id = None
-    
+
+    async def _update_site_status(status: str, error=None):
+        """Update the site document status so it stays authoritative.
+
+        Wrapped in its own try/except so a site-update failure can never
+        mask the original crawl error.
+        """
+        try:
+            update = {"status": status}
+            if error is not None:
+                update["error"] = error
+            else:
+                update["error"] = None
+            await mongodb.update_site(site_id, update)
+        except Exception as site_err:
+            logger.error(
+                f"Failed to update site {site_id} status to {status}: {site_err}"
+            )
+
     try:
         logger.info(f"Starting crawl for site: {url} (max {max_pages} pages)")
-        
+
         crawler = CrawlerService()
         indexer = IndexerService()
-        
+
         job_id = await mongodb.create_crawl_job(url)
         pages = await crawler.crawl(
             start_url=url,
             max_pages=max_pages,
             job_id=job_id
         )
-        
+
         if not pages:
             crawler_errors = crawler.get_stats().get("error_messages", [])
             error_msg = "No pages found"
@@ -119,24 +137,27 @@ async def crawl_and_index_site(url: str, site_id: str, max_pages: int = 50):
                 else:
                     error_msg = f"No pages found: {crawler_errors[0]}"
             await mongodb.update_crawl_job(job_id, status="failed", error=error_msg)
+            await _update_site_status("failed", error_msg)
             logger.warning(f"No pages found for site: {url} - {error_msg}")
             return
-        
+
         stats = await indexer.index_pages(pages, job_id=job_id)
-        
+
         await mongodb.update_crawl_job(
             job_id,
             status="completed",
             pages_crawled=len(pages),
             pages_indexed=stats.get("indexed_pages", len(pages))
         )
-        
+        await _update_site_status("completed")
+
         logger.info(f"Completed crawl for site: {url}, indexed {stats.get('indexed_pages', 0)} pages")
-        
+
     except Exception as e:
         logger.error(f"Error crawling site {url}: {e}")
         if job_id:
             await mongodb.update_crawl_job(job_id, status="failed", error=str(e))
+        await _update_site_status("failed", str(e))
 
 
 @router.post("/setup", response_model=SetupResponse)
@@ -264,7 +285,8 @@ async def get_site_status(site_id: str):
         "url": site.get("url"),
         "status": job.get("status") if job else "pending",
         "pages_crawled": job.get("pages_crawled", 0) if job else 0,
-        "pages_indexed": job.get("pages_indexed", 0) if job else 0
+        "pages_indexed": job.get("pages_indexed", 0) if job else 0,
+        "error": job.get("errors", [])[-1] if job and job.get("status") == "failed" and job.get("errors") else None
     }
 
 

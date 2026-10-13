@@ -406,7 +406,15 @@ class MockDatabaseProvider(BaseDatabaseProvider):
     async def get_crawl_job(self, job_id: str) -> Optional[Dict]:
         """Get crawl job by ID."""
         return self._crawl_jobs.get(job_id)
-    
+
+    async def get_crawl_job_by_url(self, url: str) -> Optional[Dict]:
+        """Get the latest crawl job by target URL."""
+        jobs = [j for j in self._crawl_jobs.values() if j.get("target_url") == url]
+        if not jobs:
+            return None
+        # Return the most recently created job for this URL.
+        return max(jobs, key=lambda j: j.get("created_at", datetime.min))
+
     # ===========================================
     # Page Operations
     # ===========================================

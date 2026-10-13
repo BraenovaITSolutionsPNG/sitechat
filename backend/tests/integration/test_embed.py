@@ -121,12 +121,12 @@ class TestEmbedSecurityEndpoints:
 
 class TestEmbedStatusEndpoints:
     """Tests for embed status endpoints."""
-    
+
     @pytest.mark.asyncio
     async def test_get_site_status_success(self, client, mock_database, sample_site):
         """Test getting site status."""
         mock_database.seed_site(sample_site)
-        
+
         # Create a crawl job using provider interface
         job_id = await mock_database.create_crawl_job(sample_site.get("url", "https://example.com"))
         await mock_database.update_crawl_job(
@@ -135,37 +135,82 @@ class TestEmbedStatusEndpoints:
             pages_crawled=10,
             pages_indexed=10
         )
-        
+
         response = await client.get(
             f"/api/embed/status/{sample_site['site_id']}"
         )
-        
+
         assert response.status_code == 200
         data = response.json()
         assert data["site_id"] == sample_site["site_id"]
         assert "status" in data
-    
+
+    @pytest.mark.asyncio
+    async def test_get_site_status_includes_error_on_failure(self, client, mock_database, sample_site):
+        """Status endpoint surfaces the crawl job's error when the crawl failed."""
+        mock_database.seed_site(sample_site)
+
+        job_id = await mock_database.create_crawl_job(sample_site.get("url", "https://example.com"))
+        await mock_database.update_crawl_job(
+            job_id,
+            status="failed",
+            error="Crawl failed: connection reset"
+        )
+
+        response = await client.get(
+            f"/api/embed/status/{sample_site['site_id']}"
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["site_id"] == sample_site["site_id"]
+        assert data["status"] == "failed"
+        assert data["error"] == "Crawl failed: connection reset"
+
+    @pytest.mark.asyncio
+    async def test_get_site_status_error_is_none_when_completed(self, client, mock_database, sample_site):
+        """Status endpoint returns error=None when the crawl job succeeded."""
+        mock_database.seed_site(sample_site)
+
+        job_id = await mock_database.create_crawl_job(sample_site.get("url", "https://example.com"))
+        await mock_database.update_crawl_job(
+            job_id,
+            status="completed",
+            pages_crawled=10,
+            pages_indexed=10
+        )
+
+        response = await client.get(
+            f"/api/embed/status/{sample_site['site_id']}"
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "completed"
+        assert data["error"] is None
+
     @pytest.mark.asyncio
     async def test_get_site_status_not_found(self, client, mock_database):
         """Test getting status for non-existent site."""
         # Don't seed any site
         response = await client.get("/api/embed/status/nonexistent")
-        
+
         assert response.status_code == 404
-    
+
     @pytest.mark.asyncio
     async def test_get_site_status_pending_crawl(self, client, mock_database, sample_site):
         """Test status when crawl is pending."""
         mock_database.seed_site(sample_site)
         # No crawl job created - should be pending
-        
+
         response = await client.get(
             f"/api/embed/status/{sample_site['site_id']}"
         )
-        
+
         assert response.status_code == 200
         data = response.json()
         assert data["status"] == "pending"
+        assert data["error"] is None
 
 
 class TestSetupChatbotEndpoint:

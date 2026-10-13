@@ -165,7 +165,17 @@ class BaseDatabaseProvider(ABC):
     async def get_crawl_job(self, job_id: str) -> Optional[Dict]:
         """Get crawl job by ID."""
         pass
-    
+
+    async def get_crawl_job_by_url(self, url: str) -> Optional[Dict]:
+        """Get the latest crawl job by target URL.
+
+        Default returns None; providers that index jobs by URL (e.g. the
+        mock used in tests, and the legacy MongoDB adapter) override this.
+        Routes guard calls with hasattr() so this optional method's absence
+        never breaks a provider.
+        """
+        return None
+
     # ===========================================
     # Page Operations
     # ===========================================

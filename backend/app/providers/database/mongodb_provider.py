@@ -369,7 +369,17 @@ class MongoDBProvider(BaseDatabaseProvider):
         if job:
             job["_id"] = str(job["_id"])
         return job
-    
+
+    async def get_crawl_job_by_url(self, url: str) -> Optional[Dict]:
+        """Get the latest crawl job by target URL."""
+        job = await self.db.crawl_jobs.find_one(
+            {"target_url": url},
+            sort=[("created_at", -1)]
+        )
+        if job:
+            job["_id"] = str(job["_id"])
+        return job
+
     # ===========================================
     # Page Operations
     # ===========================================

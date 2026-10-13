@@ -70,6 +70,70 @@ class TestSitesEndpoints:
         assert response.status_code == 403
     
     @pytest.mark.asyncio
+    async def test_list_sites_includes_job_error(self, authenticated_client, mock_database, sample_site):
+        """List endpoint surfaces the crawl job's error when the crawl failed."""
+        mock_database.seed_site(sample_site)
+
+        job_id = await mock_database.create_crawl_job(sample_site.get("url", "https://example.com"))
+        await mock_database.update_crawl_job(
+            job_id,
+            status="failed",
+            error="Crawl failed: connection timeout"
+        )
+
+        response = await authenticated_client.get("/api/sites")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert isinstance(data, list)
+        site = next(s for s in data if s["site_id"] == sample_site["site_id"])
+        assert site["status"] == "failed"
+        assert site["error"] == "Crawl failed: connection timeout"
+
+    @pytest.mark.asyncio
+    async def test_list_sites_error_is_none_when_no_failed_job(self, authenticated_client, mock_database, sample_site):
+        """List endpoint returns error=None when the crawl job succeeded."""
+        mock_database.seed_site(sample_site)
+
+        job_id = await mock_database.create_crawl_job(sample_site.get("url", "https://example.com"))
+        await mock_database.update_crawl_job(
+            job_id,
+            status="completed",
+            pages_crawled=5,
+            pages_indexed=5
+        )
+
+        response = await authenticated_client.get("/api/sites")
+
+        assert response.status_code == 200
+        data = response.json()
+        site = next(s for s in data if s["site_id"] == sample_site["site_id"])
+        assert site["status"] == "completed"
+        assert site["error"] is None
+
+    @pytest.mark.asyncio
+    async def test_get_site_detail_includes_job_error(self, authenticated_client, mock_database, sample_site):
+        """Single-site detail endpoint surfaces the crawl job's error."""
+        mock_database.seed_site(sample_site)
+
+        job_id = await mock_database.create_crawl_job(sample_site.get("url", "https://example.com"))
+        await mock_database.update_crawl_job(
+            job_id,
+            status="failed",
+            error="Crawl failed: bot protection"
+        )
+
+        response = await authenticated_client.get(
+            f"/api/sites/{sample_site['site_id']}"
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["site_id"] == sample_site["site_id"]
+        assert data["status"] == "failed"
+        assert data["error"] == "Crawl failed: bot protection"
+
+    @pytest.mark.asyncio
     async def test_admin_can_access_any_site(self, admin_client, mock_database):
         """Test that admin can access any site."""
         other_user_site = {
