@@ -4,8 +4,8 @@ SiteChat - FastAPI Application
 A production-ready RAG chatbot platform with configurable providers.
 
 Provider Architecture:
-- LLM: Ollama, OpenAI, Anthropic, Azure (via LangChain)
-- Embeddings: HuggingFace, OpenAI, Ollama (via LangChain)
+- LLM: Ollama, OpenAI, OpenRouter, Anthropic, Azure (via LangChain + OpenAI-compatible endpoints)
+- Embeddings: HuggingFace, OpenAI, OpenRouter, Ollama (via LangChain)
 - Vector Store: FAISS, Chroma, Pinecone, Qdrant (via LangChain)
 - Database: MongoDB (extensible to PostgreSQL)
 - Storage: Local (extensible to S3, GCS)
@@ -151,11 +151,17 @@ app.add_middleware(SecurityHeadersMiddleware)
 # 2. Request validation
 app.add_middleware(RequestValidationMiddleware)
 
-# 3. Trusted host middleware (only in production)
-if settings.is_production and settings.TRUSTED_HOSTS != "*":
+# 3. Trusted host middleware (only in production, and never with an empty
+# allowlist — an empty list would reject every request, including health checks)
+if settings.is_production and settings.TRUSTED_HOSTS != "*" and settings.trusted_hosts_list:
     app.add_middleware(
         TrustedHostMiddleware,
         allowed_hosts=settings.trusted_hosts_list
+    )
+elif settings.is_production and settings.TRUSTED_HOSTS != "*":
+    logger.warning(
+        "TRUSTED_HOSTS is set but empty — TrustedHostMiddleware disabled so "
+        "requests are not blocked. Set TRUSTED_HOSTS to your domain(s)."
     )
 
 # 4. CORS middleware - using configurable origins

@@ -3,8 +3,10 @@ Configuration settings for the SiteChat Platform.
 Supports multiple providers for LLM, embeddings, vector store, database, storage, and cache.
 """
 import secrets
+from urllib.parse import urlparse
+
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings
-from pydantic import field_validator
 from functools import lru_cache
 from typing import Literal, Optional, List
 
@@ -15,6 +17,9 @@ class Settings(BaseSettings):
     DEBUG: bool = False
     ENVIRONMENT: Literal["development", "staging", "production"] = "development"
     SITE_URL: str = "http://localhost:8000"
+    # Set automatically by Render.com; used to derive SITE_URL/CORS/TRUSTED_HOSTS
+    # when those are not explicitly configured.
+    RENDER_EXTERNAL_URL: Optional[str] = None
     
     # ===========================================
     # Security Settings
@@ -67,11 +72,39 @@ class Settings(BaseSettings):
         if self.TRUSTED_HOSTS == "*":
             return ["*"]
         return [host.strip() for host in self.TRUSTED_HOSTS.split(",") if host.strip()]
+
+    @model_validator(mode="after")
+    def _apply_render_defaults(self):
+        """
+        On Render.com, default SITE_URL, CORS_ORIGINS and TRUSTED_HOSTS to the
+        service's public URL when they are not configured. Explicit non-empty
+        values always win; a field that is absent from the environment (still
+        holding its code default) or set to a blank value derives the Render
+        URL — an empty TRUSTED_HOSTS allowlist would reject every request.
+        """
+        render_url = (self.RENDER_EXTERNAL_URL or "").rstrip("/")
+        if not render_url:
+            return self
+
+        host = urlparse(render_url).netloc
+        if not host:
+            return self
+
+        def _needs_default(name: str) -> bool:
+            return name not in self.model_fields_set or not str(getattr(self, name) or "").strip()
+
+        if _needs_default("SITE_URL"):
+            self.SITE_URL = render_url
+        if _needs_default("TRUSTED_HOSTS"):
+            self.TRUSTED_HOSTS = host
+        if _needs_default("CORS_ORIGINS"):
+            self.CORS_ORIGINS = render_url
+        return self
     
     # ===========================================
     # LLM Provider Configuration
     # ===========================================
-    LLM_PROVIDER: Literal["ollama", "openai", "anthropic", "azure"] = "ollama"
+    LLM_PROVIDER: Literal["ollama", "openai", "openrouter", "anthropic", "azure"] = "ollama"
     LLM_MODEL: str = "llama3.1:8b"
     LLM_TEMPERATURE: float = 0.7
     LLM_MAX_TOKENS: int = 1000
@@ -84,13 +117,24 @@ class Settings(BaseSettings):
     AZURE_OPENAI_ENDPOINT: Optional[str] = None
     AZURE_OPENAI_API_KEY: Optional[str] = None
     AZURE_OPENAI_DEPLOYMENT: Optional[str] = None
+    AZURE_OPENAI_API_VERSION: str = "2024-10-21"
     OLLAMA_BASE_URL: str = "http://localhost:11434"
+    # OpenAI-compatible endpoints (used when OPENAI_BASE_URL is set or provider is openrouter)
+    OPENAI_BASE_URL: Optional[str] = None
+    OPENROUTER_BASE_URL: str = "https://openrouter.ai/api/v1"
+    OPENROUTER_API_KEY: Optional[str] = None
+    # Optional attribution headers sent to OpenRouter (shown on your OpenRouter dashboard)
+    OPENROUTER_SITE_URL: Optional[str] = None
+    OPENROUTER_APP_NAME: Optional[str] = None
     
     # ===========================================
     # Embeddings Provider Configuration
     # ===========================================
-    EMBEDDINGS_PROVIDER: Literal["ollama", "openai", "huggingface"] = "huggingface"
+    EMBEDDINGS_PROVIDER: Literal["ollama", "openai", "openrouter", "huggingface"] = "huggingface"
     EMBEDDINGS_MODEL: str = "all-MiniLM-L6-v2"
+    # Vector size for OpenAI-compatible embeddings (e.g. 1536 for openai/text-embedding-3-small).
+    # Leave empty to use the model default.
+    EMBEDDINGS_DIMENSIONS: Optional[int] = None
     
     # ===========================================
     # Vector Store Provider Configuration

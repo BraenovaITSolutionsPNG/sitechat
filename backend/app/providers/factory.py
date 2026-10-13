@@ -15,7 +15,7 @@ def get_llm():
     """
     Factory for LLM - returns LangChain chat model based on config.
     
-    Supported providers: ollama, openai, anthropic, azure
+    Supported providers: ollama, openai, openrouter, anthropic, azure
     """
     provider = settings.LLM_PROVIDER
     logger.info(f"Initializing LLM provider: {provider}")
@@ -24,12 +24,32 @@ def get_llm():
         from langchain_openai import ChatOpenAI
         if not settings.OPENAI_API_KEY:
             raise ValueError("OPENAI_API_KEY is required for OpenAI provider")
-        return ChatOpenAI(
-            model=settings.LLM_MODEL,
-            api_key=settings.OPENAI_API_KEY,
-            temperature=settings.LLM_TEMPERATURE,
-            max_tokens=settings.LLM_MAX_TOKENS
-        )
+        kwargs = {
+            "model": settings.LLM_MODEL,
+            "api_key": settings.OPENAI_API_KEY,
+            "temperature": settings.LLM_TEMPERATURE,
+            "max_tokens": settings.LLM_MAX_TOKENS
+        }
+        if settings.OPENAI_BASE_URL:
+            kwargs["base_url"] = settings.OPENAI_BASE_URL
+        return ChatOpenAI(**kwargs)
+    
+    elif provider == "openrouter":
+        from langchain_openai import ChatOpenAI
+        from app.services.openai_compat import openrouter_base_url, openrouter_headers
+        if not settings.OPENROUTER_API_KEY:
+            raise ValueError("OPENROUTER_API_KEY is required for OpenRouter provider")
+        default_headers = openrouter_headers()
+        kwargs = {
+            "model": settings.LLM_MODEL,
+            "api_key": settings.OPENROUTER_API_KEY,
+            "base_url": openrouter_base_url(),
+            "temperature": settings.LLM_TEMPERATURE,
+            "max_tokens": settings.LLM_MAX_TOKENS
+        }
+        if default_headers:
+            kwargs["default_headers"] = default_headers
+        return ChatOpenAI(**kwargs)
     
     elif provider == "anthropic":
         from langchain_anthropic import ChatAnthropic
@@ -50,6 +70,7 @@ def get_llm():
             azure_endpoint=settings.AZURE_OPENAI_ENDPOINT,
             api_key=settings.AZURE_OPENAI_API_KEY,
             azure_deployment=settings.AZURE_OPENAI_DEPLOYMENT or settings.LLM_MODEL,
+            api_version=settings.AZURE_OPENAI_API_VERSION,
             temperature=settings.LLM_TEMPERATURE,
             max_tokens=settings.LLM_MAX_TOKENS
         )
@@ -71,7 +92,7 @@ def get_embeddings():
     """
     Factory for embeddings - returns LangChain embeddings based on config.
     
-    Supported providers: huggingface, openai, ollama
+    Supported providers: huggingface, openai, openrouter, ollama
     """
     provider = settings.EMBEDDINGS_PROVIDER
     logger.info(f"Initializing embeddings provider: {provider}")
@@ -80,9 +101,30 @@ def get_embeddings():
         from langchain_openai import OpenAIEmbeddings
         if not settings.OPENAI_API_KEY:
             raise ValueError("OPENAI_API_KEY is required for OpenAI embeddings")
-        return OpenAIEmbeddings(
+        kwargs = {
+            "model": settings.EMBEDDINGS_MODEL,
+            "api_key": settings.OPENAI_API_KEY
+        }
+        if settings.OPENAI_BASE_URL:
+            kwargs["base_url"] = settings.OPENAI_BASE_URL
+        if settings.EMBEDDINGS_DIMENSIONS:
+            kwargs["dimensions"] = settings.EMBEDDINGS_DIMENSIONS
+        return OpenAIEmbeddings(**kwargs)
+    
+    elif provider == "openrouter":
+        from app.services.openai_compat import (
+            OpenAICompatibleEmbeddings,
+            openrouter_base_url,
+            openrouter_headers,
+        )
+        if not settings.OPENROUTER_API_KEY:
+            raise ValueError("OPENROUTER_API_KEY is required for OpenRouter embeddings")
+        return OpenAICompatibleEmbeddings(
+            base_url=openrouter_base_url(),
+            api_key=settings.OPENROUTER_API_KEY,
             model=settings.EMBEDDINGS_MODEL,
-            api_key=settings.OPENAI_API_KEY
+            dimensions=settings.EMBEDDINGS_DIMENSIONS,
+            extra_headers=openrouter_headers() or None,
         )
     
     elif provider == "huggingface":

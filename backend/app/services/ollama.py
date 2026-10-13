@@ -6,6 +6,7 @@ from typing import AsyncGenerator, Optional, Dict, Any
 from loguru import logger
 
 from app.config import settings
+from app.services.openai_compat import format_http_error
 
 # Reuse one HTTP client per process (avoids TCP/TLS handshake overhead per chat).
 _http_client: Optional[httpx.AsyncClient] = None
@@ -43,20 +44,19 @@ class OllamaService:
 
     def _http_error_detail(self, response: httpx.Response, endpoint: str) -> str:
         """Build a clear error when Ollama returns non-200 (404 is usually unknown model)."""
-        code = response.status_code
-        body = (response.text or "").strip()
-        if len(body) > 500:
-            body = body[:500] + "…"
-        hint = ""
-        if code == 404:
-            hint = (
-                f'Model "{self.model}" was not found at {self.base_url}. '
-                f"Install it with: ollama pull {self.model} — then confirm `ollama list` and that "
-                f"LLM_MODEL in .env matches the tag exactly. "
-            )
-        else:
-            hint = f"Request: POST {self.base_url}{endpoint}. "
-        return f"Ollama returned status {code}. {hint}Response: {body or '(empty)'}"
+        return format_http_error(
+            response,
+            endpoint,
+            self.base_url,
+            self.model,
+            hints={
+                404: (
+                    f'Model "{self.model}" was not found at {self.base_url}. '
+                    f"Install it with: ollama pull {self.model} — then confirm `ollama list` and that "
+                    f"LLM_MODEL in .env matches the tag exactly. "
+                )
+            },
+        )
     
     async def generate(
         self,

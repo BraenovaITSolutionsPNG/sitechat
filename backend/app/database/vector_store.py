@@ -5,15 +5,15 @@ import os
 import pickle
 from typing import List, Dict, Optional
 from langchain_community.vectorstores import FAISS
-from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_core.documents import Document
 from loguru import logger
 
 from app.config import settings
+from app.providers.factory import get_embeddings
 
 
 class VectorStore:
-    """FAISS vector store with HuggingFace embeddings."""
+    """FAISS vector store using the configured embeddings provider."""
     
     def __init__(self):
         self.embeddings = None
@@ -30,22 +30,37 @@ class VectorStore:
             # Create directories
             os.makedirs(settings.CHROMA_PERSIST_DIR, exist_ok=True)
             
-            # Initialize embeddings (HuggingFace - runs locally)
-            logger.info("Loading embedding model...")
-            self.embeddings = HuggingFaceEmbeddings(
-                model_name="sentence-transformers/all-MiniLM-L6-v2",
-                model_kwargs={'device': 'cpu'},
-                encode_kwargs={'normalize_embeddings': True}
+            # Initialize embeddings from the configured provider
+            # (huggingface, openai, openrouter, or ollama)
+            logger.info(
+                f"Loading embeddings provider: {settings.EMBEDDINGS_PROVIDER} "
+                f"({settings.EMBEDDINGS_MODEL})"
             )
+            self.embeddings = get_embeddings()
             
             # Try to load existing index
             if os.path.exists(self.index_path):
                 logger.info("Loading existing FAISS index...")
-                self.vector_store = FAISS.load_local(
-                    self.index_path,
-                    self.embeddings,
-                    allow_dangerous_deserialization=True
-                )
+                try:
+                    self.vector_store = FAISS.load_local(
+                        self.index_path,
+                        self.embeddings,
+                        allow_dangerous_deserialization=True
+                    )
+                except Exception as e:
+                    # Common cause: the index was built with a different
+                    # embedding model/dimensions. Start fresh instead of
+                    # failing startup — sites can be re-crawled to rebuild.
+                    logger.warning(
+                        f"Could not load FAISS index at {self.index_path} ({e}); "
+                        "creating a new index. Existing content must be re-crawled."
+                    )
+                    self.vector_store = FAISS.from_texts(
+                        ["Initial document"],
+                        self.embeddings,
+                        metadatas=[{"source": "init"}]
+                    )
+                    self._save_index()
             else:
                 logger.info("Creating new FAISS index...")
                 # Create empty index with a dummy document

@@ -25,7 +25,7 @@ A production-ready **RAG (Retrieval Augmented Generation)** chatbot platform tha
 | 🔒 | **Privacy First** | Run entirely on your infrastructure. Use local LLMs (Ollama) for complete data isolation—your conversations never touch external servers. |
 | ♾️ | **Unlimited Everything** | One deployment = unlimited sites, unlimited chatbots, unlimited conversations. No per-site fees, no usage caps. |
 | 🏠 | **Self-Hosted** | Your data stays on your servers. Full privacy and control over your customer interactions. |
-| 🔄 | **No Vendor Lock-in** | Swap between Ollama, OpenAI, Anthropic, or Azure with a single env var. |
+| 🔄 | **No Vendor Lock-in** | Swap between OpenRouter, Ollama, OpenAI, Anthropic, or Azure with a single env var. |
 | 🚀 | **Production Ready** | Security headers, rate limiting, JWT auth, and 440+ tests included. |
 | 🎨 | **White-Label** | Fully customizable branding for the platform and chat widget. |
 | 📦 | **Easy Integration** | Single `<script>` tag to add chat to any website. |
@@ -84,7 +84,7 @@ Many businesses rely on cloud-based chatbot services that charge recurring subsc
 | **Data Privacy** | Your data on their servers, shared infrastructure | **100% self-hosted**, data never leaves your control |
 | **AI Model Privacy** | All queries sent to cloud APIs | Run local LLMs (Ollama) for **complete data isolation** |
 | **Page/Content Limits** | Tiered limits (50-5000 pages), overages charged | Unlimited pages and documents |
-| **LLM Flexibility** | Locked to their chosen model (usually one provider) | Swap between Ollama, OpenAI, Anthropic, or Azure freely |
+| **LLM Flexibility** | Locked to their chosen model (usually one provider) | Swap between OpenRouter, Ollama, OpenAI, Anthropic, or Azure freely |
 | **Customization** | Limited branding options, "Powered by" badges | Full white-labeling, complete UI control |
 | **Compliance** | Limited compliance options | GDPR/HIPAA-ready, air-gapped deployments possible |
 | **Vendor Lock-in** | Proprietary formats, no data export | Open source, standard formats, full portability |
@@ -111,9 +111,9 @@ SiteChat requires self-hosting infrastructure and technical expertise to deploy 
 | Getting Started | Reference | Operations |
 |:----------------|:----------|:-----------|
 | [🚀 Quick Start](#-quick-start) | [📚 API Reference](#-api-reference) | [🧪 Testing](#-testing) |
-| [⚙️ Configuration](#️-configuration) | [🔌 Widget Integration](#-widget-integration) | [🔒 Production Security](#-production-security-checklist) |
-| [🏗️ Architecture](#️-architecture) | [🎯 Features](#-features) | [🤝 Contributing](#-contributing) |
-| [📸 Screenshots](#-screenshots) | [🔄 Comparison](#-sitechat-vs-commercial-alternatives) | [🆕 Recent updates](#-recent-updates) |
+| [☁️ Deploy to Render](#️-deploy-to-rendercom) | [🔌 Widget Integration](#-widget-integration) | [🔒 Production Security](#-production-security-checklist) |
+| [⚙️ Configuration](#️-configuration) | [🎯 Features](#-features) | [🤝 Contributing](#-contributing) |
+| [🏗️ Architecture](#️-architecture) | [🔄 Comparison](#-sitechat-vs-commercial-alternatives) | [🆕 Recent updates](#-recent-updates) |
 
 ---
 
@@ -156,6 +156,8 @@ Highlights from the latest platform and dashboard work:
 
 ### Configuration and widget build
 
+- **OpenRouter provider** — `LLM_PROVIDER=openrouter` routes chat through the OpenAI-compatible API (`https://openrouter.ai/api/v1`), and `EMBEDDINGS_PROVIDER=openrouter` does the same for embeddings. This removes the need for a local Ollama instance or HuggingFace model downloads, enabling one-service cloud deployments — see [Deploy to Render](#️-deploy-to-rendercom).
+- **Render.com blueprint** — `render.yaml` provisions the web service, persistent disk for the FAISS index/uploads, and all env defaults (`JWT_SECRET` is auto-generated).
 - **Default CORS** — Includes `http://localhost:8015` and `http://127.0.0.1:8015` for common alternate dev ports.
 - **Widget build** — If `npm run build` fails with “source missing”, restore **`frontend/src/widget/chatbot.js`** from the repo; `frontend/widget/` is build output only.
 
@@ -190,7 +192,7 @@ Highlights from the latest platform and dashboard work:
 - **Confidence Scores** - Each response includes a confidence rating
 - **Follow-up Suggestions** - AI suggests relevant follow-up questions
 - **Streaming Responses** - Real-time streaming for better UX
-- **Multi-LLM Support** - Ollama, OpenAI, Anthropic, Azure OpenAI
+- **Multi-LLM Support** - OpenRouter, Ollama, OpenAI, Anthropic, Azure OpenAI
 
 </details>
 
@@ -337,8 +339,8 @@ SiteChat uses a **Provider Pattern** for all infrastructure components, making i
 
 | Component | Options | Default |
 |-----------|---------|---------|
-| **LLM** | Ollama, OpenAI, Anthropic, Azure | Ollama |
-| **Embeddings** | HuggingFace, OpenAI, Ollama | HuggingFace |
+| **LLM** | Ollama, OpenAI, OpenRouter, Anthropic, Azure | Ollama |
+| **Embeddings** | HuggingFace, OpenAI, OpenRouter, Ollama | HuggingFace |
 | **Vector Store** | FAISS, Chroma, Pinecone, Qdrant | FAISS |
 | **Database** | MongoDB, PostgreSQL (planned) | MongoDB |
 | **Storage** | Local, S3 (planned), GCS (planned) | Local |
@@ -353,6 +355,15 @@ Change environment variables in `.env`:
 LLM_PROVIDER=openai
 LLM_MODEL=gpt-4-turbo
 OPENAI_API_KEY=sk-xxx
+
+# Example: Switch to OpenRouter (one key, 300+ models)
+LLM_PROVIDER=openrouter
+LLM_MODEL=openai/gpt-4o-mini
+OPENROUTER_API_KEY=sk-or-xxx
+# OpenRouter is also an embeddings provider (no local model download):
+EMBEDDINGS_PROVIDER=openrouter
+EMBEDDINGS_MODEL=openai/text-embedding-3-small
+EMBEDDINGS_DIMENSIONS=1536
 
 # Example: Switch to Pinecone
 VECTOR_STORE_PROVIDER=pinecone
@@ -489,19 +500,22 @@ APP_NAME=SiteChat
 DEBUG=true
 
 # ===========================================
-# LLM Provider (ollama, openai, anthropic, azure)
+# LLM Provider (ollama, openai, openrouter, anthropic, azure)
 # ===========================================
 LLM_PROVIDER=ollama
 LLM_MODEL=llama3.1:8b
 OLLAMA_BASE_URL=http://localhost:11434
 # OPENAI_API_KEY=sk-xxx          # If using OpenAI
 # ANTHROPIC_API_KEY=sk-ant-xxx   # If using Anthropic
+# OPENROUTER_API_KEY=sk-or-xxx   # If using OpenRouter (one key for 300+ models)
 
 # ===========================================
-# Embeddings Provider (huggingface, openai, ollama)
+# Embeddings Provider (huggingface, openai, openrouter, ollama)
+# Use openrouter/openai to skip local model downloads (no torch needed)
 # ===========================================
 EMBEDDINGS_PROVIDER=huggingface
 EMBEDDINGS_MODEL=all-MiniLM-L6-v2
+# EMBEDDINGS_DIMENSIONS=1536      # Vector size for OpenAI-compatible embeddings
 
 # ===========================================
 # Vector Store (faiss, chroma, pinecone, qdrant)
@@ -553,6 +567,103 @@ ADMIN_PASSWORD=YourStr0ng!Passw0rd
 MIN_PASSWORD_LENGTH=8
 REQUIRE_PASSWORD_COMPLEXITY=true
 ```
+
+---
+
+## ☁️ Deploy to Render.com
+
+SiteChat deploys to Render as a single Python web service that hosts both the
+FastAPI backend and the frontend (landing page, dashboard, login, chat widget).
+The AI model runs through **OpenRouter** (OpenAI-compatible API), and data lives
+in **MongoDB Atlas** + a Render persistent disk — no Ollama or local model
+downloads needed.
+
+A ready-to-use blueprint ships in [`render.yaml`](render.yaml).
+
+### 1. Create a MongoDB database (Atlas free tier)
+
+Render does not offer MongoDB, so use MongoDB Atlas:
+
+1. Create a free account and an **M0** cluster at
+   [mongodb.com/cloud/atlas](https://www.mongodb.com/cloud/atlas/register).
+2. Under **Database Access**, create a database user and keep the password.
+3. Under **Network Access**, add `0.0.0.0/0` (allow from anywhere) — Render does
+   not provide static egress IPs on starter plans.
+4. Copy the connection string (`mongodb+srv://<user>:<password>@<cluster>.mongodb.net/`).
+
+### 2. Get an OpenRouter API key
+
+1. Create an account at [openrouter.ai](https://openrouter.ai) and add a small
+   credit balance (a few dollars covers heavy testing).
+2. Create a key at [openrouter.ai/keys](https://openrouter.ai/keys).
+3. Pick models: chat (e.g. `openai/gpt-4o-mini`) and embeddings
+   (`openai/text-embedding-3-small`). Model IDs must match OpenRouter's catalog.
+
+### 3. Deploy the blueprint
+
+1. Push this repo to GitHub (already at `BraenovaITSolutionsPNG/sitechat`).
+2. In the [Render dashboard](https://dashboard.render.com): **New → Blueprint**
+   and select the repo. Render reads `render.yaml` and proposes the `sitechat`
+   web service.
+3. When prompted for the **secret** environment variables, fill in:
+
+   | Variable | Value |
+   |----------|-------|
+   | `OPENROUTER_API_KEY` | `sk-or-...` from step 2 |
+   | `MONGODB_URL` | `mongodb+srv://...` from step 1 |
+   | `ADMIN_EMAIL` | Your admin login email |
+   | `ADMIN_PASSWORD` | Strong password (you must change it after first login) |
+
+   `JWT_SECRET` is generated by Render automatically (`generateValue: true`).
+4. Click **Apply** and wait for the first build (~5–10 minutes while Python
+   dependencies install).
+
+### 4. Verify the deployment
+
+| Check | URL |
+|-------|-----|
+| API info (health check path) | `https://<service>.onrender.com/api` |
+| API docs | `https://<service>.onrender.com/api/docs` |
+| Landing page | `https://<service>.onrender.com/` |
+| Dashboard | `https://<service>.onrender.com/app` |
+
+Then log in at `/login`, add a site, run a crawl, and test the widget. The
+`GET /api/admin/health` endpoint reports MongoDB, vector store, and LLM provider
+status — it requires an admin login token (the dashboard sends one automatically;
+the provider probe is cached for 30s so it cannot be used to run up API costs).
+
+### 5. Attach a custom domain (optional)
+
+1. Render dashboard → your service → **Settings → Custom Domains** → add domain.
+2. Update these env vars to the new domain:
+   - `SITE_URL=https://yourdomain.com`
+   - `TRUSTED_HOSTS=yourdomain.com` (missing this causes `400 Bad Request`)
+   - `CORS_ORIGINS=https://yourdomain.com` plus every site that embeds the
+     widget (comma-separated, or `*` to allow any site)
+
+When these are unset or left blank, Render's own URL is used automatically
+(`RENDER_EXTERNAL_URL` is provided by Render).
+
+### Render-specific notes
+
+- **Plan**: `starter` or higher. The free tier has no persistent disk and spins
+  down when idle (~1 min cold start), which also pauses the crawl scheduler.
+- **Persistent data**: the FAISS index is written under `CHROMA_PERSIST_DIR`
+  (`/var/data/faiss_index` on the Render disk), so crawled content survives
+  deploys. Uploaded documents are parsed and stored in MongoDB. Without a disk,
+  re-index by re-crawling sites after each deploy.
+- **Embeddings**: `EMBEDDINGS_PROVIDER=openrouter` (the blueprint default) sends
+  embedding requests to OpenRouter, so no local model download and no torch —
+  the app's vector store honors this setting at runtime.
+- **Embeddings model change**: switching `EMBEDDINGS_MODEL`/dimensions
+  invalidates the existing FAISS index — the app rebuilds an empty index
+  automatically; re-crawl sites to repopulate it.
+- **Python version** is pinned to 3.11 (`PYTHON_VERSION`) in the blueprint.
+- **Costs**: you pay Render (~$7/mo starter) + OpenRouter usage (~$0.15–0.60
+  per 1M tokens depending on model). Atlas M0 is free.
+- **Rebuild the widget** locally (`cd frontend && npm run build`) before
+  deploying if you change `frontend/src/widget/chatbot.js` — the built files are
+  committed and served as-is.
 
 ---
 

@@ -54,7 +54,7 @@ loguru>=0.7.2
 # ===========================================
 
 # LLM Providers (optional - install if using)
-# langchain-openai>=0.1.0          # For OpenAI/Azure LLM
+langchain-openai>=0.1.0              # For OpenAI/OpenRouter/Azure LLM + embeddings
 # langchain-anthropic>=0.1.0       # For Anthropic Claude
 
 # Vector Store Providers (optional - install if using)

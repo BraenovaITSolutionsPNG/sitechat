@@ -4,6 +4,7 @@ Tests LLM, Embeddings, and VectorStore provider creation and configuration.
 """
 import pytest
 from unittest.mock import MagicMock, patch, AsyncMock
+from types import SimpleNamespace
 import os
 import sys
 
@@ -58,6 +59,7 @@ class TestLLMFactory:
         mock_settings = MagicMock()
         mock_settings.LLM_PROVIDER = "openai"
         mock_settings.OPENAI_API_KEY = "test-api-key"
+        mock_settings.OPENAI_BASE_URL = None
         mock_settings.LLM_MODEL = "gpt-4"
         mock_settings.LLM_TEMPERATURE = 0.7
         mock_settings.LLM_MAX_TOKENS = 1000
@@ -76,6 +78,111 @@ class TestLLMFactory:
                     temperature=0.7,
                     max_tokens=1000
                 )
+    
+    @pytest.mark.skipif(not HAS_LANGCHAIN_OPENAI, reason="langchain_openai not installed")
+    def test_get_llm_openai_custom_base_url(self):
+        """OpenAI provider passes base_url through when configured."""
+        mock_settings = MagicMock()
+        mock_settings.LLM_PROVIDER = "openai"
+        mock_settings.OPENAI_API_KEY = "test-api-key"
+        mock_settings.OPENAI_BASE_URL = "https://gateway.example.com/v1"
+        mock_settings.LLM_MODEL = "gpt-4"
+        mock_settings.LLM_TEMPERATURE = 0.7
+        mock_settings.LLM_MAX_TOKENS = 1000
+        
+        with patch("app.providers.factory.settings", mock_settings):
+            with patch("langchain_openai.ChatOpenAI") as mock_chat:
+                from app.providers.factory import get_llm, clear_provider_cache
+                clear_provider_cache()
+                
+                mock_chat.return_value = MagicMock()
+                get_llm()
+                
+                mock_chat.assert_called_once_with(
+                    model="gpt-4",
+                    api_key="test-api-key",
+                    base_url="https://gateway.example.com/v1",
+                    temperature=0.7,
+                    max_tokens=1000
+                )
+    
+    @pytest.mark.skipif(not HAS_LANGCHAIN_OPENAI, reason="langchain_openai not installed")
+    def test_get_llm_openrouter_provider(self):
+        """Test OpenRouter LLM provider creation (OpenAI-compatible endpoint)."""
+        mock_settings = MagicMock()
+        mock_settings.LLM_PROVIDER = "openrouter"
+        mock_settings.OPENROUTER_API_KEY = "test-or-key"
+        mock_settings.OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+        mock_settings.OPENROUTER_SITE_URL = None
+        mock_settings.OPENROUTER_APP_NAME = None
+        mock_settings.LLM_MODEL = "openai/gpt-4o-mini"
+        mock_settings.LLM_TEMPERATURE = 0.7
+        mock_settings.LLM_MAX_TOKENS = 1000
+        
+        with patch("app.providers.factory.settings", mock_settings):
+            with patch("langchain_openai.ChatOpenAI") as mock_chat:
+                from app.providers.factory import get_llm, clear_provider_cache
+                clear_provider_cache()
+                
+                mock_chat.return_value = MagicMock()
+                llm = get_llm()
+                
+                mock_chat.assert_called_once_with(
+                    model="openai/gpt-4o-mini",
+                    api_key="test-or-key",
+                    base_url="https://openrouter.ai/api/v1",
+                    temperature=0.7,
+                    max_tokens=1000
+                )
+    
+    @pytest.mark.skipif(not HAS_LANGCHAIN_OPENAI, reason="langchain_openai not installed")
+    def test_get_llm_openrouter_attribution_headers(self):
+        """OpenRouter attribution headers are passed as default_headers."""
+        mock_settings = MagicMock()
+        mock_settings.LLM_PROVIDER = "openrouter"
+        mock_settings.OPENROUTER_API_KEY = "test-or-key"
+        mock_settings.OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+        mock_settings.OPENROUTER_SITE_URL = "https://example.com"
+        mock_settings.OPENROUTER_APP_NAME = "SiteChat"
+        mock_settings.LLM_MODEL = "openai/gpt-4o-mini"
+        mock_settings.LLM_TEMPERATURE = 0.7
+        mock_settings.LLM_MAX_TOKENS = 1000
+
+        mock_compat_settings = SimpleNamespace(
+            OPENROUTER_SITE_URL="https://example.com",
+            OPENROUTER_APP_NAME="SiteChat",
+            OPENROUTER_BASE_URL="https://openrouter.ai/api/v1",
+        )
+
+        with patch("app.providers.factory.settings", mock_settings), \
+             patch("app.services.openai_compat.settings", mock_compat_settings):
+            with patch("langchain_openai.ChatOpenAI") as mock_chat:
+                from app.providers.factory import get_llm, clear_provider_cache
+                clear_provider_cache()
+                
+                mock_chat.return_value = MagicMock()
+                get_llm()
+                
+                call_kwargs = mock_chat.call_args.kwargs
+                assert call_kwargs["default_headers"] == {
+                    "HTTP-Referer": "https://example.com",
+                    "X-Title": "SiteChat",
+                }
+                assert call_kwargs["base_url"] == "https://openrouter.ai/api/v1"
+    
+    @pytest.mark.skipif(not HAS_LANGCHAIN_OPENAI, reason="langchain_openai not installed")
+    def test_get_llm_openrouter_missing_api_key(self):
+        """Test OpenRouter provider raises error when API key is missing."""
+        mock_settings = MagicMock()
+        mock_settings.LLM_PROVIDER = "openrouter"
+        mock_settings.OPENROUTER_API_KEY = None
+        
+        with patch("app.providers.factory.settings", mock_settings):
+            from app.providers.factory import get_llm, clear_provider_cache
+            clear_provider_cache()
+            
+            with pytest.raises(ValueError, match="OPENROUTER_API_KEY is required"):
+                get_llm()
     
     @pytest.mark.skipif(not HAS_LANGCHAIN_OPENAI, reason="langchain_openai not installed")
     def test_get_llm_openai_missing_api_key(self):
@@ -132,12 +239,13 @@ class TestLLMFactory:
     
     @pytest.mark.skipif(not HAS_LANGCHAIN_OPENAI, reason="langchain_openai not installed")
     def test_get_llm_azure_provider(self):
-        """Test Azure OpenAI LLM provider creation."""
+        """Test Azure LLM provider creation."""
         mock_settings = MagicMock()
         mock_settings.LLM_PROVIDER = "azure"
-        mock_settings.AZURE_OPENAI_ENDPOINT = "https://test.openai.azure.com"
+        mock_settings.AZURE_OPENAI_ENDPOINT = "https://test.openai.azure.com/"
         mock_settings.AZURE_OPENAI_API_KEY = "test-azure-key"
-        mock_settings.AZURE_OPENAI_DEPLOYMENT = "gpt-4-deployment"
+        mock_settings.AZURE_OPENAI_DEPLOYMENT = "gpt-4"
+        mock_settings.AZURE_OPENAI_API_VERSION = "2024-10-21"
         mock_settings.LLM_MODEL = "gpt-4"
         mock_settings.LLM_TEMPERATURE = 0.7
         mock_settings.LLM_MAX_TOKENS = 1000
@@ -151,9 +259,10 @@ class TestLLMFactory:
                 llm = get_llm()
                 
                 mock_chat.assert_called_once_with(
-                    azure_endpoint="https://test.openai.azure.com",
+                    azure_endpoint="https://test.openai.azure.com/",
                     api_key="test-azure-key",
-                    azure_deployment="gpt-4-deployment",
+                    azure_deployment="gpt-4",
+                    api_version="2024-10-21",
                     temperature=0.7,
                     max_tokens=1000
                 )
@@ -239,6 +348,8 @@ class TestEmbeddingsFactory:
         mock_settings = MagicMock()
         mock_settings.EMBEDDINGS_PROVIDER = "openai"
         mock_settings.OPENAI_API_KEY = "test-api-key"
+        mock_settings.OPENAI_BASE_URL = None
+        mock_settings.EMBEDDINGS_DIMENSIONS = None
         mock_settings.EMBEDDINGS_MODEL = "text-embedding-3-small"
         
         with patch("app.providers.factory.settings", mock_settings):
@@ -253,6 +364,43 @@ class TestEmbeddingsFactory:
                     model="text-embedding-3-small",
                     api_key="test-api-key"
                 )
+    
+    def test_get_embeddings_openrouter_provider(self):
+        """Test OpenRouter embeddings provider creation (OpenAI-compatible endpoint)."""
+        from app.services.openai_compat import OpenAICompatibleEmbeddings
+        
+        mock_settings = MagicMock()
+        mock_settings.EMBEDDINGS_PROVIDER = "openrouter"
+        mock_settings.OPENROUTER_API_KEY = "test-or-key"
+        mock_settings.OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+        mock_settings.OPENROUTER_SITE_URL = None
+        mock_settings.EMBEDDINGS_MODEL = "openai/text-embedding-3-small"
+        mock_settings.EMBEDDINGS_DIMENSIONS = 1536
+        
+        with patch("app.providers.factory.settings", mock_settings):
+            from app.providers.factory import get_embeddings, clear_provider_cache
+            clear_provider_cache()
+            
+            embeddings = get_embeddings()
+            
+            assert isinstance(embeddings, OpenAICompatibleEmbeddings)
+            assert embeddings.model == "openai/text-embedding-3-small"
+            assert embeddings.dimensions == 1536
+            assert embeddings.api_key == "test-or-key"
+            assert embeddings.base_url == "https://openrouter.ai/api/v1"
+    
+    def test_get_embeddings_openrouter_missing_api_key(self):
+        """Test OpenRouter embeddings raises error when API key is missing."""
+        mock_settings = MagicMock()
+        mock_settings.EMBEDDINGS_PROVIDER = "openrouter"
+        mock_settings.OPENROUTER_API_KEY = None
+        
+        with patch("app.providers.factory.settings", mock_settings):
+            from app.providers.factory import get_embeddings, clear_provider_cache
+            clear_provider_cache()
+            
+            with pytest.raises(ValueError, match="OPENROUTER_API_KEY is required for OpenRouter embeddings"):
+                get_embeddings()
     
     @pytest.mark.skipif(not HAS_LANGCHAIN_OPENAI, reason="langchain_openai not installed")
     def test_get_embeddings_openai_missing_api_key(self):
@@ -591,6 +739,65 @@ class TestVectorStoreFactory:
                         vs = get_vector_store()
                         
                         mock_embeddings.assert_called_once()
+
+
+class TestSettingsRenderDefaults:
+    """Tests for deriving SITE_URL/TRUSTED_HOSTS/CORS_ORIGINS on Render."""
+
+    def test_blank_values_derive_from_render_external_url(self, monkeypatch):
+        monkeypatch.setenv("RENDER_EXTERNAL_URL", "https://sitechat-abc.onrender.com")
+        monkeypatch.setenv("SITE_URL", "")
+        monkeypatch.setenv("TRUSTED_HOSTS", "")
+        monkeypatch.setenv("CORS_ORIGINS", "")
+
+        s = Settings()
+
+        assert s.SITE_URL == "https://sitechat-abc.onrender.com"
+        assert s.trusted_hosts_list == ["sitechat-abc.onrender.com"]
+        assert s.CORS_ORIGINS == "https://sitechat-abc.onrender.com"
+
+    def test_explicit_values_win_over_render_external_url(self, monkeypatch):
+        monkeypatch.setenv("RENDER_EXTERNAL_URL", "https://sitechat-abc.onrender.com")
+        monkeypatch.setenv("SITE_URL", "https://example.com")
+        monkeypatch.setenv("TRUSTED_HOSTS", "example.com,api.example.com")
+        monkeypatch.setenv("CORS_ORIGINS", "https://example.com,https://widget.example.com")
+
+        s = Settings()
+
+        assert s.SITE_URL == "https://example.com"
+        assert s.trusted_hosts_list == ["example.com", "api.example.com"]
+        assert s.CORS_ORIGINS == "https://example.com,https://widget.example.com"
+
+    def test_without_render_url_values_are_untouched(self, monkeypatch):
+        monkeypatch.delenv("RENDER_EXTERNAL_URL", raising=False)
+        monkeypatch.setenv("TRUSTED_HOSTS", "localhost,127.0.0.1")
+        monkeypatch.setenv("SITE_URL", "http://localhost:8000")
+        monkeypatch.setenv("CORS_ORIGINS", "http://localhost:8000")
+
+        s = Settings()
+
+        assert s.trusted_hosts_list == ["localhost", "127.0.0.1"]
+        assert s.SITE_URL == "http://localhost:8000"
+
+    def test_whitespace_values_are_treated_as_unset(self, monkeypatch):
+        monkeypatch.setenv("RENDER_EXTERNAL_URL", "https://sitechat-abc.onrender.com")
+        monkeypatch.setenv("TRUSTED_HOSTS", "   ")
+
+        s = Settings()
+
+        assert s.trusted_hosts_list == ["sitechat-abc.onrender.com"]
+
+    def test_absent_values_derive_instead_of_keeping_localhost_default(self, monkeypatch):
+        """Unset vars must not keep the localhost defaults on Render."""
+        monkeypatch.setenv("RENDER_EXTERNAL_URL", "https://sitechat-abc.onrender.com")
+        for name in ("SITE_URL", "TRUSTED_HOSTS", "CORS_ORIGINS"):
+            monkeypatch.delenv(name, raising=False)
+
+        s = Settings()
+
+        assert s.SITE_URL == "https://sitechat-abc.onrender.com"
+        assert s.trusted_hosts_list == ["sitechat-abc.onrender.com"]
+        assert s.CORS_ORIGINS == "https://sitechat-abc.onrender.com"
 
 
 class TestProviderCacheManagement:

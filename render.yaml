@@ -1,0 +1,117 @@
+# Render.com Blueprint for SiteChat
+# https://render.com/docs/blueprint-spec
+#
+# Deploy: Render Dashboard -> New -> Blueprint -> pick the BraenovaITSolutionsPNG/sitechat repo.
+#
+# Prerequisites (create these first, they are not managed by this file):
+#   1. MongoDB database - MongoDB Atlas free M0 cluster works:
+#      https://www.mongodb.com/cloud/atlas/register
+#      Network Access: allow 0.0.0.0/0 (Render egress IPs are not static on starter plans).
+#   2. OpenRouter API key - https://openrouter.ai/keys (fund the account with a few dollars).
+#
+# The service hosts the FastAPI backend AND the frontend (landing page, dashboard,
+# login, chat widget) from a single web service.
+
+services:
+  - type: web
+    name: sitechat
+    runtime: python
+    plan: starter # starter or higher: free tier has no persistent disk and spins down when idle
+    region: singapore # closest region to Papua New Guinea; match it with your Atlas cluster region
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api
+    disk:
+      name: sitechat-data
+      mountPath: /var/data
+      sizeGB: 1 # FAISS vector index + uploaded documents
+    envVars:
+      # --- Runtime ---
+      - key: PYTHON_VERSION
+        value: "3.11.9"
+      - key: ENVIRONMENT
+        value: production
+      - key: DEBUG
+        value: "false"
+
+      # --- LLM (OpenRouter) ---
+      - key: LLM_PROVIDER
+        value: openrouter
+      - key: LLM_MODEL
+        value: openai/gpt-4o-mini # swap for any model id listed at https://openrouter.ai/models
+      - key: LLM_TEMPERATURE
+        value: "0.7"
+      - key: LLM_MAX_TOKENS
+        value: "600"
+      - key: OPENROUTER_API_KEY
+        sync: false # set in the Render dashboard (secret)
+      - key: OPENROUTER_SITE_URL
+        sync: false # optional: your public URL, used for OpenRouter attribution
+
+      # --- Embeddings (OpenRouter, avoids local model downloads) ---
+      - key: EMBEDDINGS_PROVIDER
+        value: openrouter
+      - key: EMBEDDINGS_MODEL
+        value: openai/text-embedding-3-small
+      - key: EMBEDDINGS_DIMENSIONS
+        value: "1536"
+
+      # --- Vector store (persisted on the disk above) ---
+      - key: VECTOR_STORE_PROVIDER
+        value: faiss
+      # The runtime vector store derives its index path from CHROMA_PERSIST_DIR
+      # (./data/chroma_db/faiss_index by default), so point it at the disk.
+      - key: CHROMA_PERSIST_DIR
+        value: /var/data
+      - key: FAISS_INDEX_PATH
+        value: /var/data/faiss_index
+
+      # --- Database ---
+      - key: DATABASE_PROVIDER
+        value: mongodb
+      - key: MONGODB_URL
+        sync: false # set in the Render dashboard (secret): mongodb+srv://...
+      - key: MONGODB_DB
+        value: SiteChat
+
+      # --- Storage / cache ---
+      - key: STORAGE_PROVIDER
+        value: local
+      - key: LOCAL_STORAGE_PATH
+        value: /var/data/uploads
+      - key: CACHE_PROVIDER
+        value: memory
+
+      # --- Auth ---
+      - key: JWT_SECRET
+        generateValue: true # Render generates and stores a secure secret
+      - key: JWT_ALGORITHM
+        value: HS256
+      - key: JWT_EXPIRE_HOURS
+        value: "24"
+      - key: ADMIN_EMAIL
+        sync: false # first-run admin account (created when no admin exists)
+      - key: ADMIN_PASSWORD
+        sync: false # set a strong password; you must change it after first login
+
+      # --- Domain / CORS (optional: derived from the render.com URL) ---
+      # Leave these blank in the dashboard to use the assigned onrender.com URL.
+      # After attaching a custom domain, set SITE_URL and TRUSTED_HOSTS to it, and add
+      # every site that embeds the chat widget to CORS_ORIGINS (comma-separated, or *).
+      - key: SITE_URL
+        sync: false
+      - key: TRUSTED_HOSTS
+        sync: false
+      - key: CORS_ORIGINS
+        sync: false
+
+      # --- Crawler / rate limits ---
+      - key: MAX_PAGES
+        value: "100"
+      - key: CRAWL_DELAY
+        value: "1.0"
+      - key: RATE_LIMIT_REQUESTS
+        value: "20"
+      - key: RATE_LIMIT_WINDOW
+        value: "60"

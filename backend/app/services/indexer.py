@@ -1,6 +1,7 @@
 """
 Indexer service for chunking and storing documents.
 """
+import asyncio
 from typing import List, Dict, Optional
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_core.documents import Document
@@ -52,8 +53,9 @@ class IndexerService:
                 if not chunks:
                     continue
                 
-                # Add to vector store
-                vector_store.add_documents(chunks)
+                # Add to vector store (blocking embedding calls run off the
+                # event loop so concurrent requests are not stalled)
+                await asyncio.to_thread(vector_store.add_documents, chunks)
                 
                 # Save page metadata to MongoDB
                 await mongodb.save_page(

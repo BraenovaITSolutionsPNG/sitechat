@@ -2505,7 +2505,9 @@ async function checkHealth() {
     });
     
     try {
-        const response = await fetch(`${API_BASE}/admin/health`);
+        const response = await fetch(`${API_BASE}/admin/health`, {
+            headers: getAuthHeaders()
+        });
         const health = await response.json();
         
         checks.forEach(check => {

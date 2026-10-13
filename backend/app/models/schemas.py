@@ -113,7 +113,7 @@ class HealthCheck(BaseModel):
     status: str = Field(..., description="Service status")
     mongodb: str = Field(..., description="MongoDB connection status")
     vector_store: str = Field(..., description="Vector store status")
-    ollama: str = Field(..., description="Ollama status")
+    ollama: str = Field(..., description="Chat LLM provider status (Ollama, OpenAI, OpenRouter, or Azure)")
 
 
 # ==================== Site Configuration Models ====================

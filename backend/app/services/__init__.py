@@ -3,7 +3,7 @@ Services for the chatbot.
 """
 from .crawler import CrawlerService
 from .indexer import IndexerService
-from .rag_engine import RAGEngine
 from .ollama import OllamaService
+from .rag_engine import RAGEngine
 
-__all__ = ["CrawlerService", "IndexerService", "RAGEngine", "OllamaService"]
+__all__ = ["CrawlerService", "IndexerService", "OllamaService", "RAGEngine"]

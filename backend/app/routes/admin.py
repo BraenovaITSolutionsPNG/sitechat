@@ -1,25 +1,57 @@
 """
 Admin API routes.
 """
-from fastapi import APIRouter, HTTPException
+import time
+
+from fastapi import APIRouter, Depends, HTTPException
 from loguru import logger
 
 from app.models.schemas import HealthCheck, SystemStats
 from app.database import get_mongodb, get_vector_store
-from app.services.ollama import get_ollama_service
+from app.routes.auth import require_admin
+from app.services.rag_engine import get_chat_service
 from app.config import settings
 
 router = APIRouter(prefix="/api/admin", tags=["Admin"])
 
+# The LLM provider probe sends the configured API key to a metered endpoint, so
+# cache the result briefly instead of probing on every request.
+_CHAT_PROBE_TTL_SECONDS = 30
+_chat_probe_cache = {"status": None, "checked_at": 0.0}
 
-@router.get("/health", response_model=HealthCheck)
+
+async def _cached_chat_probe() -> str:
+    """Return the cached chat provider status, refreshing at most every 30s."""
+    now = time.monotonic()
+    if _chat_probe_cache["status"] is not None and (
+        now - _chat_probe_cache["checked_at"] < _CHAT_PROBE_TTL_SECONDS
+    ):
+        return _chat_probe_cache["status"]
+
+    try:
+        chat_service = get_chat_service()
+        healthy = await chat_service.check_health()
+        models = await chat_service.list_models() if healthy else []
+        if healthy:
+            status = f"healthy: {settings.LLM_PROVIDER} ({len(models)} models)"
+        else:
+            status = f"unhealthy: {settings.LLM_PROVIDER} not responding"
+    except Exception as e:
+        status = f"unhealthy: {str(e)}"
+
+    _chat_probe_cache["status"] = status
+    _chat_probe_cache["checked_at"] = now
+    return status
+
+
+@router.get("/health", response_model=HealthCheck, dependencies=[Depends(require_admin)])
 async def health_check():
     """
     Check the health of all services.
     """
     mongodb_status = "unknown"
     vector_store_status = "unknown"
-    ollama_status = "unknown"
+    chat_status = "unknown"
     
     try:
         # Check MongoDB
@@ -38,27 +70,19 @@ async def health_check():
         except Exception as e:
             vector_store_status = f"unhealthy: {str(e)}"
         
-        # Check Ollama
-        try:
-            ollama = get_ollama_service()
-            if await ollama.check_health():
-                models = await ollama.list_models()
-                ollama_status = f"healthy ({len(models)} models)"
-            else:
-                ollama_status = "unhealthy: not responding"
-        except Exception as e:
-            ollama_status = f"unhealthy: {str(e)}"
+        # Check the configured chat LLM provider (Ollama, OpenAI, OpenRouter, Azure)
+        chat_status = await _cached_chat_probe()
         
         overall = "healthy" if all(
             s.startswith("healthy")
-            for s in [mongodb_status, vector_store_status, ollama_status]
+            for s in [mongodb_status, vector_store_status, chat_status]
         ) else "degraded"
         
         return HealthCheck(
             status=overall,
             mongodb=mongodb_status,
             vector_store=vector_store_status,
-            ollama=ollama_status
+            ollama=chat_status
         )
         
     except Exception as e:
@@ -67,7 +91,7 @@ async def health_check():
             status="unhealthy",
             mongodb=mongodb_status,
             vector_store=vector_store_status,
-            ollama=ollama_status
+            ollama=chat_status
         )
 
 

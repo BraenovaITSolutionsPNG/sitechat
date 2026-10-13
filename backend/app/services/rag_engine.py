@@ -19,6 +19,7 @@ import numpy as np
 from app.config import settings
 from app.database import get_mongodb, get_vector_store
 from app.services.ollama import get_ollama_service
+from app.services.openai_compat import get_openai_compat_service
 from app.models.schemas import ChatResponse, SourceDocument
 
 
@@ -28,13 +29,25 @@ def _truncate_text(text: str, max_chars: int) -> str:
     return text[: max_chars - 1].rstrip() + "…"
 
 
+def get_chat_service():
+    """
+    Return the chat service for the configured LLM provider.
+
+    Ollama keeps using its native API; openai/openrouter/azure use the
+    OpenAI-compatible chat completions interface.
+    """
+    if settings.LLM_PROVIDER == "ollama":
+        return get_ollama_service()
+    return get_openai_compat_service()
+
+
 class RAGEngine:
     """RAG Engine with production-ready features."""
     
     QA_MATCH_THRESHOLD = 0.85  # Confidence threshold for using Q&A pair directly
     
     def __init__(self):
-        self.ollama = get_ollama_service()
+        self.chat_service = get_chat_service()
         self.vector_store = get_vector_store()
         self._qa_cache: Dict[str, List[Dict]] = {}  # Cache Q&A pairs by site_id
         self._qa_embeddings_cache: Dict[str, List[Tuple[str, List[float]]]] = {}  # Cache Q&A embeddings
@@ -66,17 +79,20 @@ class RAGEngine:
             return None
         
         try:
-            # Get embeddings for Q&A questions if not cached
+            # Get embeddings for Q&A questions if not cached.
+            # Embedding calls are blocking HTTP round trips, so run them in a
+            # worker thread to keep the event loop free for other requests.
             if site_id not in self._qa_embeddings_cache:
                 embeddings_model = self.vector_store.embeddings
-                qa_embeddings = []
-                
-                for qa in qa_pairs:
-                    question = qa.get("question", "")
-                    embedding = embeddings_model.embed_query(question)
-                    qa_embeddings.append((qa["id"], embedding))
-                
-                self._qa_embeddings_cache[site_id] = qa_embeddings
+                questions = [qa.get("question", "") for qa in qa_pairs]
+                vectors = await asyncio.to_thread(
+                    embeddings_model.embed_documents, questions
+                )
+                self._qa_embeddings_cache[site_id] = [
+                    (qa["id"], vector)
+                    for qa, vector in zip(qa_pairs, vectors)
+                    if vector
+                ]
             
             qa_embeddings = self._qa_embeddings_cache.get(site_id, [])
             
@@ -85,8 +101,9 @@ class RAGEngine:
             
             # Get query embedding
             embeddings_model = self.vector_store.embeddings
-            query_embedding = embeddings_model.embed_query(query)
-            query_embedding = np.array(query_embedding)
+            query_embedding = np.array(
+                await asyncio.to_thread(embeddings_model.embed_query, query)
+            )
             
             # Find best matching Q&A pair using cosine similarity
             best_match = None
@@ -304,7 +321,7 @@ class RAGEngine:
             system_prompt = self._get_system_prompt(site_name)
 
             full_response = ""
-            async for chunk in self.ollama.generate_stream(
+            async for chunk in self.chat_service.generate_stream(
                 prompt,
                 system_prompt,
                 temperature=settings.LLM_TEMPERATURE,
@@ -353,7 +370,7 @@ New question: {query}
 Rewritten search query (just the query, no explanation):"""
         
         try:
-            rewritten = await self.ollama.generate(
+            rewritten = await self.chat_service.generate(
                 prompt,
                 temperature=0.3,
                 max_tokens=150
@@ -507,7 +524,7 @@ Answer the user's question naturally and conversationally. Be brief by default; 
             if user_memory:
                 system_prompt += f"\n\nUser preferences: {user_memory}"
         
-        response = await self.ollama.generate(
+        response = await self.chat_service.generate(
             prompt,
             system_prompt,
             temperature=settings.LLM_TEMPERATURE,
@@ -529,7 +546,7 @@ Answer: {answer[:500]}
 Return only the questions, one per line, no numbering:"""
         
         try:
-            response = await self.ollama.generate(
+            response = await self.chat_service.generate(
                 prompt,
                 temperature=0.7,
                 max_tokens=200

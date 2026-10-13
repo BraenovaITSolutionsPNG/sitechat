@@ -74,6 +74,75 @@ def rag_engine(mock_ollama_service, mock_vector_store_rag):
         return engine
 
 
+# ==================== _check_qa_match Tests ====================
+
+class TestCheckQAMatch:
+    """Tests for Q&A short-circuit matching and embedding batching."""
+
+    @staticmethod
+    def _mongodb_with_qa(qa_pairs):
+        mongodb = MagicMock()
+        mongodb.get_qa_for_rag = AsyncMock(return_value=qa_pairs)
+        return mongodb
+
+    @pytest.mark.asyncio
+    async def test_match_uses_single_batched_embedding_call(self, rag_engine, mock_vector_store_rag):
+        """Q&A questions are embedded in one batched call, not one call each."""
+        qa_pairs = [
+            {"id": "qa1", "question": "How do I log a workout?", "answer": "Tap +."},
+            {"id": "qa2", "question": "How do I invite a coach?", "answer": "Share the code."},
+        ]
+        vector = [1.0, 0.0, 0.0]
+        mock_vector_store_rag.embeddings.embed_documents.return_value = [vector, [0.0, 1.0, 0.0]]
+        mock_vector_store_rag.embeddings.embed_query.return_value = vector
+
+        with patch(
+            "app.services.rag_engine.get_mongodb",
+            AsyncMock(return_value=self._mongodb_with_qa(qa_pairs)),
+        ):
+            match = await rag_engine._check_qa_match("How do I log a workout?", "site1")
+
+        assert match is not None
+        qa, score = match
+        assert qa["id"] == "qa1"
+        assert score >= rag_engine.QA_MATCH_THRESHOLD
+        mock_vector_store_rag.embeddings.embed_documents.assert_called_once_with(
+            ["How do I log a workout?", "How do I invite a coach?"]
+        )
+        mock_vector_store_rag.embeddings.embed_query.assert_called_once_with("How do I log a workout?")
+
+    @pytest.mark.asyncio
+    async def test_no_match_below_threshold(self, rag_engine, mock_vector_store_rag):
+        qa_pairs = [{"id": "qa1", "question": "Unrelated question?", "answer": "Answer."}]
+        mock_vector_store_rag.embeddings.embed_documents.return_value = [[0.0, 1.0, 0.0]]
+        mock_vector_store_rag.embeddings.embed_query.return_value = [1.0, 0.0, 0.0]
+
+        with patch(
+            "app.services.rag_engine.get_mongodb",
+            AsyncMock(return_value=self._mongodb_with_qa(qa_pairs)),
+        ):
+            match = await rag_engine._check_qa_match("How do I log a workout?", "site1")
+
+        assert match is None
+
+    @pytest.mark.asyncio
+    async def test_no_site_id_returns_none(self, rag_engine):
+        assert await rag_engine._check_qa_match("query", None) is None
+
+    @pytest.mark.asyncio
+    async def test_embedding_error_returns_none(self, rag_engine, mock_vector_store_rag):
+        qa_pairs = [{"id": "qa1", "question": "Q?", "answer": "A."}]
+        mock_vector_store_rag.embeddings.embed_documents.side_effect = Exception("provider 402")
+
+        with patch(
+            "app.services.rag_engine.get_mongodb",
+            AsyncMock(return_value=self._mongodb_with_qa(qa_pairs)),
+        ):
+            match = await rag_engine._check_qa_match("Q?", "site1")
+
+        assert match is None
+
+
 # ==================== _rewrite_query Tests ====================
 
 class TestRewriteQuery:
