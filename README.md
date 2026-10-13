@@ -157,7 +157,7 @@ Highlights from the latest platform and dashboard work:
 ### Configuration and widget build
 
 - **OpenRouter provider** — `LLM_PROVIDER=openrouter` routes chat through the OpenAI-compatible API (`https://openrouter.ai/api/v1`), and `EMBEDDINGS_PROVIDER=openrouter` does the same for embeddings. This removes the need for a local Ollama instance or HuggingFace model downloads, enabling one-service cloud deployments — see [Deploy to Render](#️-deploy-to-rendercom).
-- **Render.com blueprint** — `render.yaml` provisions the web service, persistent disk for the FAISS index/uploads, and all env defaults (`JWT_SECRET` is auto-generated).
+- **Render.com blueprint** — `render.yaml` provisions the web service on Render's free plan and all env defaults (`JWT_SECRET` is auto-generated); the free plan has no persistent disk, so the FAISS index/uploads are ephemeral and sites are re-crawled after each deploy.
 - **Default CORS** — Includes `http://localhost:8015` and `http://127.0.0.1:8015` for common alternate dev ports.
 - **Widget build** — If `npm run build` fails with “source missing”, restore **`frontend/src/widget/chatbot.js`** from the repo; `frontend/widget/` is build output only.
 
@@ -575,8 +575,10 @@ REQUIRE_PASSWORD_COMPLEXITY=true
 SiteChat deploys to Render as a single Python web service that hosts both the
 FastAPI backend and the frontend (landing page, dashboard, login, chat widget).
 The AI model runs through **OpenRouter** (OpenAI-compatible API), and data lives
-in **MongoDB Atlas** + a Render persistent disk — no Ollama or local model
-downloads needed.
+in **MongoDB Atlas** — no Ollama or local model downloads needed. The blueprint
+targets Render's **free** plan, so there is no persistent disk: crawled content is
+indexed on the ephemeral container filesystem and must be re-crawled after each
+deploy (see the notes below). Add a disk by upgrading to a paid plan.
 
 A ready-to-use blueprint ships in [`render.yaml`](render.yaml).
 
@@ -646,12 +648,24 @@ When these are unset or left blank, Render's own URL is used automatically
 
 ### Render-specific notes
 
-- **Plan**: `starter` or higher. The free tier has no persistent disk and spins
-  down when idle (~1 min cold start), which also pauses the crawl scheduler.
-- **Persistent data**: the FAISS index is written under `CHROMA_PERSIST_DIR`
-  (`/var/data/faiss_index` on the Render disk), so crawled content survives
-  deploys. Uploaded documents are parsed and stored in MongoDB. Without a disk,
-  re-index by re-crawling sites after each deploy.
+- **Plan**: `free` works, with trade-offs. The free plan has **no persistent
+  disk** (Disks require a paid plan), 512 MB RAM, and the service spins down
+  when idle.
+- **Free plan — no persistent disk**: the FAISS index and uploaded documents live
+  on the ephemeral container filesystem (in-container defaults
+  `./data/chroma_db`, `./data/faiss_index`, `./data/uploads`), so they are lost on
+  every deploy or restart. **Re-crawl your sites after each deploy** to repopulate
+  the index. A paid plan re-adds the disk: set `CHROMA_PERSIST_DIR=/var/data` and
+  re-add the `disk:` block to `render.yaml`.
+- **Free plan — 512 MB RAM**: keep `EMBEDDINGS_PROVIDER=openrouter` (already the
+  blueprint default). Switching to `huggingface` embeddings downloads torch +
+  a model and **will OOM** at 512 MB.
+- **Free plan — idle spin-down**: the service sleeps after ~15 minutes of
+  inactivity with a ~1 minute cold start on the next request, which also pauses
+  the in-process crawl scheduler while asleep.
+- **Persistent data**: MongoDB (Atlas) keeps sites, users, conversations, leads
+  and parsed documents across deploys — only the FAISS index and uploads are
+  ephemeral on free (no disk).
 - **Embeddings**: `EMBEDDINGS_PROVIDER=openrouter` (the blueprint default) sends
   embedding requests to OpenRouter, so no local model download and no torch —
   the app's vector store honors this setting at runtime.
@@ -659,8 +673,9 @@ When these are unset or left blank, Render's own URL is used automatically
   invalidates the existing FAISS index — the app rebuilds an empty index
   automatically; re-crawl sites to repopulate it.
 - **Python version** is pinned to 3.11 (`PYTHON_VERSION`) in the blueprint.
-- **Costs**: you pay Render (~$7/mo starter) + OpenRouter usage (~$0.15–0.60
-  per 1M tokens depending on model). Atlas M0 is free.
+- **Costs**: on the free plan Render is $0/mo (upgrading to starter is ~$7/mo);
+  you still pay OpenRouter usage (~$0.15–0.60 per 1M tokens depending on model).
+  Atlas M0 is free.
 - **Rebuild the widget** locally (`cd frontend && npm run build`) before
   deploying if you change `frontend/src/widget/chatbot.js` — the built files are
   committed and served as-is.

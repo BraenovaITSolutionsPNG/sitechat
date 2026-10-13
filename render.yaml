@@ -11,21 +11,27 @@
 #
 # The service hosts the FastAPI backend AND the frontend (landing page, dashboard,
 # login, chat widget) from a single web service.
+#
+# Free plan: no persistent disk (re-crawl after each deploy/restart), 512MB RAM
+# (OpenRouter embeddings required), spins down when idle.
 
 services:
   - type: web
     name: sitechat
     runtime: python
-    plan: starter # starter or higher: free tier has no persistent disk and spins down when idle
+    plan: free # free plan trade-offs:
+               #   - no persistent disk (ephemeral container filesystem): the FAISS
+               #     index and uploads are wiped on every deploy/restart, so sites
+               #     must be re-crawled afterwards
+               #   - 512 MB RAM / 0.1 CPU
+               #   - idle spin-down: sleeps after ~15 min of inactivity with a
+               #     ~1 min cold start, which also pauses the in-process crawl
+               #     scheduler while the service is asleep
     region: singapore # closest region to Papua New Guinea; match it with your Atlas cluster region
     rootDir: backend
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /api
-    disk:
-      name: sitechat-data
-      mountPath: /var/data
-      sizeGB: 1 # FAISS vector index + uploaded documents
     envVars:
       # --- Runtime ---
       - key: PYTHON_VERSION
@@ -57,15 +63,18 @@ services:
       - key: EMBEDDINGS_DIMENSIONS
         value: "1536"
 
-      # --- Vector store (persisted on the disk above) ---
+      # --- Vector store ---
       - key: VECTOR_STORE_PROVIDER
         value: faiss
-      # The runtime vector store derives its index path from CHROMA_PERSIST_DIR
-      # (./data/chroma_db/faiss_index by default), so point it at the disk.
-      - key: CHROMA_PERSIST_DIR
-        value: /var/data
-      - key: FAISS_INDEX_PATH
-        value: /var/data/faiss_index
+      # No disk on the free plan, so the app's in-container defaults apply:
+      # CHROMA_PERSIST_DIR=./data/chroma_db and FAISS_INDEX_PATH=./data/faiss_index
+      # (the vector store derives its index path from CHROMA_PERSIST_DIR), plus
+      # LOCAL_STORAGE_PATH=./data/uploads below. All of that lives on the
+      # EPHEMERAL container filesystem: the FAISS index and uploads are wiped on
+      # every deploy/restart, so re-crawl sites after each deploy to repopulate the
+      # index (MongoDB keeps documents, users and conversations - only the index and
+      # uploads are lost). To upgrade to a paid plan: set CHROMA_PERSIST_DIR=/var/data
+      # and re-add the disk block above.
 
       # --- Database ---
       - key: DATABASE_PROVIDER
@@ -78,8 +87,8 @@ services:
       # --- Storage / cache ---
       - key: STORAGE_PROVIDER
         value: local
-      - key: LOCAL_STORAGE_PATH
-        value: /var/data/uploads
+      # LOCAL_STORAGE_PATH is left unset on free: the default ./data/uploads is
+      # ephemeral (see the vector store note above).
       - key: CACHE_PROVIDER
         value: memory
 
